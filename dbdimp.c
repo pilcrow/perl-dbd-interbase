@@ -2179,53 +2179,36 @@ static int ib_fill_isqlda(SV *sth, imp_sth_t *imp_sth, SV *param, SV *value,
         case SQL_VARYING:
             DBI_TRACE_imp_xxh(imp_sth, 1, (DBIc_LOGPIO(imp_sth), "ib_fill_isqlda: SQL_VARYING\n"));
         {
-            char buf[25]; /* long long can have max 20 chars. */
-            char *tmp = NULL;
+            char *string;
+
             if (ivar->sqldata == (char *) NULL)
             {
                 if ((ivar->sqldata = (char *)safemalloc(
-                    sizeof(char) * (ivar->sqllen + 1) + sizeof(short))) == NULL)
+                    sizeof(char) * ivar->sqllen + sizeof(short))) == NULL)
                 {
                     do_error(sth, 2, "Cannot allocate buffer for VARCHAR input parameter \n");
                     retval = FALSE;
                     break;
                 }
             }
-            if (SvIOK(value)) {
-                tmp = buf;
-                len = sprintf(tmp, "%d", (int)SvIV(value));
-            }
-            else if (SvNOK(value)) {
-                tmp = buf;
-                len = sprintf(tmp, "%f", SvNV(value));
-            }
-            else if (SvPOK(value) || (SvTYPE(value) == SVt_PVMG)) {
-                len = SvCUR(value);
-                tmp = SvPV_nolen(value);
-            }
-            else {
-                /* error */
-                do_error(sth, 2, "Cannot cast to VARCHAR input parameter\n");
-                retval = FALSE;
-                break;
-            }
+
+            string = SvPV(value, len);
 
             /* The first word of VARCHAR sqldata is the length */
              *((short *) ivar->sqldata) = len;
-            /* is the scalar longer than the database field? */
 
-            if (len > (sizeof(char) * (ivar->sqllen+1)))
+            /* is the scalar longer than the database field? */
+            if (len > (sizeof(char) * ivar->sqllen))
             {
                 char err[80];
                 sprintf(err, "You are trying to put %d characters into a %d character field",
-                        len, (sizeof(char) * (ivar->sqllen + 1)));
+                        len, (sizeof(char) * ivar->sqllen));
                 do_error(sth, 2, err);
                 retval = FALSE;
             }
             else
             {
-                memcpy(ivar->sqldata + sizeof(short), tmp, len);
-                ivar->sqldata[len + sizeof(short)] = '\0';
+                memcpy(ivar->sqldata + sizeof(short), string, len);
             }
 
             break;
@@ -2234,8 +2217,7 @@ static int ib_fill_isqlda(SV *sth, imp_sth_t *imp_sth, SV *param, SV *value,
         case SQL_TEXT:
             DBI_TRACE_imp_xxh(imp_sth, 1, (DBIc_LOGPIO(imp_sth), "ib_fill_isqlda: SQL_TEXT\n"));
         {
-            char buf[25]; /* long long can have max 20 chars. */
-            char *tmp;
+            char *string;
 
             if (ivar->sqldata == (char *) NULL)
             {
@@ -2247,39 +2229,23 @@ static int ib_fill_isqlda(SV *sth, imp_sth_t *imp_sth, SV *param, SV *value,
                     break;
                 }
             }
-            if (SvIOK(value)) {
-                tmp = buf;
-                len = sprintf(tmp, "%d", (int)SvIV(value));
-            }
-            else if (SvNOK(value)) {
-                tmp = buf;
-                len = sprintf(tmp, "%f", SvNV(value));
-            }
-            else if (SvPOK(value) || (SvTYPE(value) == SVt_PVMG)) {
-                len = SvCUR(value);
-                tmp = SvPV_nolen(value);
-            }
-            else {
-                /* error */
-                do_error(sth, 2, "Cannot cast to TEXT input parameter\n");
-                retval = FALSE;
-                break;
-            }
+
+            string = SvPV(value, len);
 
             /* is the scalar longer than the database field? */
-            if (len > (sizeof(char) * (ivar->sqllen+1)))
+            if (len > (sizeof(char) * ivar->sqllen))
             {
                 /* error? or truncate? */
                 char err[80];
                 sprintf(err, "You are trying to put %d characters into a %d character field",
-                        len, (sizeof(char) * (ivar->sqllen+1)));
+                        len, (sizeof(char) * ivar->sqllen));
                 do_error(sth, 2, err);
                 retval = FALSE;
             }
             else
             {
                 memset(ivar->sqldata, ' ', ivar->sqllen);
-                memcpy(ivar->sqldata, tmp, len);
+                memcpy(ivar->sqldata, string, len);
             }
 
             break;
