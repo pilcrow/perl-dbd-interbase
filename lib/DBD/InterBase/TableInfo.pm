@@ -1,5 +1,20 @@
 use strict;
 
+package DBD::InterBase::TableInfo;
+
+sub factory {
+    my (undef, $version_string) = @_;
+    my $klass = 'DBD::InterBase::TableInfo::Basic';
+
+    if ($version_string =~ /firebird (\d\.\d+)/
+        and
+        $1 >= "2.1") {
+        $klass = 'DBD::InterBase::TableInfo::Firebird21';
+    }
+
+    $klass->new();
+}
+
 package DBD::InterBase::TableInfo::Basic;
 
 =head1 NAME
@@ -74,6 +89,8 @@ implementation supports 'TABLE', 'SYSTEM TABLE' and 'VIEW'.
 =back
 
 =cut
+
+sub new { bless {}, shift; }
 
 # Good grief.  Without CASE/END and without derived tables we stitch
 # together a UNION'd query covering all our possible
