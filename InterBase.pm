@@ -185,33 +185,37 @@ sub tables
 
 sub table_info
 {
-    my $dbh = shift;
+    my ($self, $cat, $schem, $name, $type, $attr) = @_;
+    require DBD::InterBase::TableInfo;
 
-    my $sth = $dbh->prepare(q{
-      SELECT
-        NULL                      TABLE_CAT, 
-        a.rdb$owner_name          TABLE_SCHEM,
-        a.rdb$relation_name       TABLE_NAME,
-        CAST('TABLE' AS CHAR(5))  TABLE_TYPE,
-        a.rdb$description         REMARKS
-      FROM rdb$relations a
-      WHERE a.rdb$system_flag=0 AND a.rdb$view_blr IS NULL
-        UNION ALL
-      SELECT
-        NULL                      TABLE_CAT, 
-        b.rdb$owner_name          TABLE_SCHEM,
-        b.rdb$relation_name       TABLE_NAME,
-        CAST('VIEW' AS CHAR(5))   TABLE_TYPE,
-        b.rdb$description         REMARKS
-      FROM rdb$relations b
-      WHERE b.rdb$system_flag=0 AND b.rdb$view_blr IS NOT NULL
-    });
-    $sth->execute() or return undef;
+    unless ($self->{private_table_info}) {
+        my $db_info = $self->func('version', 'ib_database_info');
+        $self->{private_table_info} =
+            DBD::InterBase::TableInfo->factory($db_info->{version});
+    }
 
-    return $sth;
+    my $ti = $self->{private_table_info};
+
+    # no warnings 'uninitialized'
+    if ($cat eq '%' and $schem eq '' and $name eq '') {
+        return $ti->list_catalogs($self);
+    } elsif ($cat eq '' and $schem eq '%' and $name eq '') {
+        return $ti->list_schema($self);
+    } elsif ($cat eq '' and $schem eq '' and $name eq '' and $type eq '%') {
+        return $ti->list_types($self);
+    } else {
+        my %seen;
+        $type = '' if $type eq '%';
+
+        # normalize $type specifiers:  upcase, strip quote and uniqify
+        my @types = grep { length and not $seen{$_}++ }
+                        map { s/'//g; s/^\s+//; s/\s+$//; uc }
+                            split(',' => $type);
+        return $ti->table_info($self, $name, @types);
+    }
 }
 
-sub ping 
+sub ping
 {
     my($dbh) = @_;
 
