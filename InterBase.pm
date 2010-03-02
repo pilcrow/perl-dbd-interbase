@@ -571,13 +571,32 @@ C<Apache::DBI>.
 
   $sth = $dbh->table_info;
 
-Supported by the driver as proposed by DBI. 
+All Interbase/Firebird versions support the basic DBI-specified columns
+(TABLE_NAME, TABLE_TYPE, etc.) as well as C<IB_TABLE_OWNER>.  Peculiar
+versions may return additional fields, prefixed by C<IB_>.
+
+Table searching may not work as expected on older Interbase/Firebird engines
+which do not natively offer a TRIM() function.  Some engines store TABLE_NAME
+in a blank-padded CHAR field, and a search for table name is performed via a
+SQL C<LIKE> predicate, which is sensitive to blanks.  That is:
+
+  $dbh->table_info('', '', 'FOO');  # May not find table "FOO", depending on
+                                    # IB/FB version
+  $dbh->table_info('', '', 'FOO%'); # Will always find "FOO", but also tables
+                                    # "FOOD", "FOOT", etc.
+
+Future versions of DBD::InterBase may attempt to work around this irritating
+limitation, at the expense of efficiency.
+
+Note that Interbase/Firebird implementations do not presently support the DBI
+concepts of 'catalog' and 'schema', so these parameters are effectively
+ignored.
 
 =item B<tables>
 
   @names = $dbh->tables;
 
-Supported by the driver as proposed by DBI. 
+Returns a list of tables, excluding any 'SYSTEM TABLE' types.
 
 =item B<type_info_all>
 
