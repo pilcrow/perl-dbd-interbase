@@ -171,8 +171,8 @@ sub tables
     my $sth = $dbh->prepare(q{
       SELECT rdb$relation_name 
       FROM rdb$relations 
-      WHERE (rdb$system_flag IS NULL OR rdb$system_flag = 0) 
-        AND rdb$view_source IS NULL;  
+      WHERE (rdb$system_flag IS NULL OR rdb$system_flag = 0)
+        AND rdb$view_source IS NULL;
     }) or return undef;
 
     $sth->{ChopBlanks} = 1;
@@ -188,13 +188,9 @@ sub table_info
     my ($self, $cat, $schem, $name, $type, $attr) = @_;
     require DBD::InterBase::TableInfo;
 
-    unless ($self->{private_table_info}) {
-        my $db_info = $self->func('version', 'ib_database_info');
-        $self->{private_table_info} =
-            DBD::InterBase::TableInfo->factory($db_info->{version});
-    }
-
-    my $ti = $self->{private_table_info};
+    my $ti = ($self->{private_table_info}
+               ||=
+              DBD::InterBase::TableInfo->factory($self));
 
     # no warnings 'uninitialized'
     if ($cat eq '%' and $schem eq '' and $name eq '') {
