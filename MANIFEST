@@ -1,6 +1,7 @@
 InterBase.h
 Changes
 lib/DBD/InterBase/GetInfo.pm
+lib/DBD/InterBase/TableInfo.pm
 lib/DBD/InterBase/TypeInfo.pm
 InterBase.pm
 InterBase.xs
