@@ -3,16 +3,22 @@ use strict;
 package DBD::InterBase::TableInfo;
 
 sub factory {
-    my (undef, $version_string) = @_;
-    my $klass = 'DBD::InterBase::TableInfo::Basic';
+    my (undef, $dbh) = @_;
+    my ($vers, $klass);
 
-    if ($version_string =~ /firebird (\d\.\d+)/
+    my $vers = $dbh->func('version', 'ib_database_info')->{version};
+
+    $dbh->trace_msg("TableInfo factory($dbh [$vers])");
+
+    if ($vers =~ /firebird (\d\.\d+)/i
         and
-        $1 >= "2.1") {
+        $1 >= 2.1) {
         $klass = 'DBD::InterBase::TableInfo::Firebird21';
+    } else {
+        $klass = 'DBD::InterBase::TableInfo::Basic';
     }
 
-    $klass->new();
+    $klass->new() if $klass;
 }
 
 package DBD::InterBase::TableInfo::Basic;
@@ -23,9 +29,12 @@ DBD::InterBase::TableInfo::Basic - A base class for lowest-common denominator In
 
 =head1 SYNOPSIS
 
-    package DBD::InterBase::TableInfo::SpecificIBVersion;
+    # Add support for a hypothetical IB derivative
+    package DBD::InterBase::TableInfo::HypotheticalIBDerivative
+
     @ISA = qw(DBD::InterBase::TableInfo::Basic);
 
+    # What table types are supported?
     sub supported_types {
         ('SYSTEM TABLE', 'TABLE', 'VIEW', 'SPECIAL TABLE TYPE');
     }
@@ -214,32 +223,35 @@ sub table_info {
     my (@conditions, @bindvars);
 
     if (length $table) {
-        push @conditions, 'TRIM(TABLE_NAME) LIKE ?';
+        push @conditions, 'TRIM(rdb$relation_name) LIKE ?';
         push @bindvars, $table;
     }
 
-    push @conditions, join ' OR ' => map { $FbTableTypes{$_} || '1=0' } @types;
+    if (@types) {
+        push @conditions, join ' OR ' => map { $FbTableTypes{$_} || '(1=0)' } @types;
+    }
 
     my $where = @conditions                           ?
                 'WHERE ' . join(' AND ', @conditions) :
+                ''                                    ;
 
     # "The Firebird System Tables Exposed"
     # Martijn Tonies, 6th Worldwide Firebird Conference 2008
     # Bergamo, Italy
     local $dbh->{ChopBlanks};
-    return $dbh->prepare(<<__eosql)
-  SELECT NULL                    AS TABLE_CAT,
-         NULL                    AS TABLE_SCHEM,
-         rdb\$relation_name      AS TABLE_NAME,
+    my $sth = $dbh->prepare(<<__eosql);
+  SELECT NULL                     AS TABLE_CAT,
+         NULL                     AS TABLE_SCHEM,
+         TRIM(rdb\$relation_name) AS TABLE_NAME,
          CASE
            WHEN rdb\$system_flag > 0         THEN 'SYSTEM TABLE'
            WHEN rdb\$view_blr IS NOT NULL    THEN 'VIEW'
            WHEN rdb\$relation_type IN (4, 5) THEN 'GLOBAL TEMPORARY'
            ELSE 'TABLE'
          END                      AS TABLE_TYPE,
-         rdb\$description         AS REMARKS,
-         rdb\$owner_name          AS ib_owner_name,
-         rdb\$external_file       AS ib_external_file,
+         TRIM(rdb\$description)   AS REMARKS,
+         TRIM(rdb\$owner_name)    AS ib_owner_name,
+         TRIM(rdb\$external_file) AS ib_external_file,
          CASE rdb\$relation_type
            WHEN 0 THEN 'Persistent'
            WHEN 1 THEN 'View'
@@ -250,8 +262,11 @@ sub table_info {
            ELSE        NULL
          END                      AS ib_relation_type
     FROM rdb\$relations
-) d $where
+    $where
 __eosql
+
+    $sth->execute(@bindvars) if $sth;
+    $sth;
 }
 
 __END__
