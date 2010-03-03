@@ -42,6 +42,7 @@ t/InterBase.mtest
 t/README
 t/ak-dbd.t
 t/dbdadmin.t
+t/dbi-rowcount.t
 t/lib.pl
 t/skeleton.test
 META.yml                                 Module meta-data (added by MakeMaker)

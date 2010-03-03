@@ -5,13 +5,20 @@
 # Verify behavior of interfaces which report number of rows affected
 
 use strict;
-use Test::More tests => 10;
-use vars qw($test_dsn $test_user $test_password $table);
+use Test::More tests => 66;
+use DBI;
+use vars qw($dbh $table);
+
 BEGIN {
+	# $::test_dsn, FindNewTable, etc.
 	for ("lib.pl", "t/lib.pl") {
-		do $_;
+		last if do $_;
 		die "Error compiling lib.pl: $@" if $@;
-		last;
+	}
+}
+END {
+	if (defined $dbh and defined $table) {
+		eval { $dbh->do("DROP TABLE $table"); };
 	}
 }
 
@@ -24,7 +31,14 @@ sub is_maybe_zbt {
 	return ok(($value == 0 and $value), $msg);
 }
 
-# == Test Battery =========================================================
+# == Test Initialization =========================================
+
+$dbh = DBI->connect($::test_dsn, $::test_user, $::test_password,
+                    {RaiseError => 1});
+pass("connect($::test_dsn)");
+$table = FindNewTable($dbh);
+$dbh->do("CREATE TABLE $table(ID INTEGER NOT NULL, NAME VARCHAR(16) NOT NULL)");
+pass("CREATE TABLE $table");
 
 my @TEST_PROGRAM = (
 	{
@@ -57,10 +71,6 @@ my @TEST_PROGRAM = (
 
 # == Tests ==
 
-my $dbh = DBI->connect($test_dsn, $test_user, $test_password,
-                       {RaiseError => 1});
-pass("connect($test_dsn)");
-
 # == 1. do()
 
 for my $spec (@TEST_PROGRAM) {
@@ -78,9 +88,9 @@ for my $spec (@TEST_PROGRAM) {
 	my $sth = $dbh->prepare($spec->{sql});
 	my $rv = $sth->execute(@bind);
 
-	is_maybe_zbt($rv, $spec->expected, "execute($spec->{desc})");
-	is_maybe_zbt($DBI::rows, $spec->expected, "execute($spec->{desc}) (\$DBI::rows)");
-	is_maybe_zbt($sth->rows, $spec->expected, "\$sth->rows($spec->{desc})");
+	is_maybe_zbt($rv, $spec->{expected}, "execute($spec->{desc})");
+	is_maybe_zbt($DBI::rows, $spec->{expected}, "execute($spec->{desc}) (\$DBI::rows)");
+	is_maybe_zbt($sth->rows, $spec->{expected}, "\$sth->rows($spec->{desc})");
 }
 
 # == 2b. repeated execute() and rows()
