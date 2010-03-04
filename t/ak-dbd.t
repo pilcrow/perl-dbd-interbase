@@ -202,7 +202,9 @@ while (Testing()) {
 
     Test($state or $sth->execute)
     or ErrMsgF("execute failed: query $query, error %s.\n", $sth->errstr);
-    Test($state  or  ($sth->rows == 1)  or  ($sth->rows == -1))
+    # DBD::InterBase reports number of rows fetched so far for SELECT
+	# statements
+    Test($state or ($sth->rows == 0))
     or ErrMsgF("sth->rows returned wrong result %s after 'execute'.\n",
            $sth->rows);
     Test($state or $sth->finish)
