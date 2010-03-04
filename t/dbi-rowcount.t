@@ -5,7 +5,7 @@
 # Verify behavior of interfaces which report number of rows affected
 
 use strict;
-use Test::More tests => 89;
+use Test::More tests => 84;
 use DBI;
 use vars qw($dbh $table);
 
@@ -77,7 +77,7 @@ for my $spec (@TEST_PROGRAM) {
 	my $rv = $dbh->do($spec->{sql}, undef, @bind);
 
 	ok(is_maybe_zbt($rv, $spec->{expected}), "do($spec->{desc})");
-	is($DBI::rows, $spec->{expected}, "do($spec->{desc}) (\$DBI::rows)");
+	# $DBI::rows is not guaranteed to be correct after $dbh->blah operations
 }
 
 # == 2a. single execute() and rows()
@@ -118,7 +118,7 @@ for my $spec (@TEST_PROGRAM) {
 
 # == 3. special cases
 #       DBD::InterBase tracks the number of FETCHes on a SELECT statement
-#       in $rows as an extension to the DBI.
+#       in $sth->rows() as an extension to the DBI.
 
 {
 	my $i = 0;
