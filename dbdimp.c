@@ -766,7 +766,7 @@ int dbd_st_prepare(SV *sth, imp_sth_t *imp_sth, char *statement, SV *attribs)
     count_item = 0;
 
     imp_sth->count_item  = 0;
-    imp_sth->fetched     = -1;
+    imp_sth->nrows       = -1;
     imp_sth->in_sqlda    = NULL;
     imp_sth->out_sqlda   = NULL;
     imp_sth->cursor_name = NULL;
@@ -881,16 +881,9 @@ int dbd_st_prepare(SV *sth, imp_sth_t *imp_sth, char *statement, SV *attribs)
         /* Implemented statement types. */
         case isc_info_sql_stmt_select:
         case isc_info_sql_stmt_select_for_upd:
-            /*
-             * Unfortunately, select count item doesn't work
-             * in current versions of InterBase.
-             * isql does it literally by fetching everything
-             * and counting the number of rows it fetched.
-             * InterBase doesn't seem to be able to estimate
-             * the number of rows before the client app
-             * fetches them all.
-             */
-             //count_item = isc_info_req_select_count;
+             // See ib_rows() -- we don't actually call
+             // isc_dsql_sql_info for SELECTs
+             count_item = isc_info_req_select_count;
              break;
 
         case isc_info_sql_stmt_insert:
@@ -1020,15 +1013,13 @@ int dbd_st_execute(SV *sth, imp_sth_t *imp_sth)
 {
     D_imp_dbh_from_sth;
     ISC_STATUS status[ISC_STATUS_LENGTH];
-    int        result = -2;
-    int        row_count = 0;
 
     DBI_TRACE_imp_xxh(imp_sth, 2, (DBIc_LOGPIO(imp_sth), "dbd_st_execute\n"));
 
     /* if not already done: start new transaction */
     if (!imp_dbh->tr)
         if (!ib_start_transaction(sth, imp_dbh))
-            return result;
+            return -2;
 
     DBI_TRACE_imp_xxh(imp_sth, 3, (DBIc_LOGPIO(imp_sth), "dbd_st_execute: statement type: %ld.\n", imp_sth->type));
 
@@ -1052,12 +1043,12 @@ int dbd_st_execute(SV *sth, imp_sth_t *imp_sth)
         if (ib_error_check(sth, status))
         {
             ib_cleanup_st_execute(imp_sth);
-            return result;
+            return -2;
         }
 
         DBI_TRACE_imp_xxh(imp_sth, 3, (DBIc_LOGPIO(imp_sth), "dbd_st_execute: isc_dsql_execute2 succeed.\n"));
 
-        imp_sth->fetched = 0;
+        imp_sth->nrows = 0; /* ??? When is it correct to return > -1 here ??? (-mjp) */
     }
     else /* all other types of SQL statements */
     {
@@ -1079,7 +1070,7 @@ int dbd_st_execute(SV *sth, imp_sth_t *imp_sth)
             if (DBIc_has(imp_dbh, DBIcf_AutoCommit) && imp_dbh->tr)
                 ib_commit_transaction(sth, imp_dbh);
 
-            return result;
+            return -2;
         }
 
         DBI_TRACE_imp_xxh(imp_sth, 3, (DBIc_LOGPIO(imp_sth), "dbd_st_execute: isc_dsql_execute succeed.\n"));
@@ -1100,7 +1091,7 @@ int dbd_st_execute(SV *sth, imp_sth_t *imp_sth)
         if (!ib_commit_transaction(sth, imp_dbh))
         {
             ib_cleanup_st_execute(imp_sth);
-            return result;
+            return -2;
         }
 
         DBI_TRACE_imp_xxh(imp_sth, 3, (DBIc_LOGPIO(imp_sth), "dbd_st_execute: ib_commit_transaction succeed.\n"));
@@ -1113,7 +1104,7 @@ int dbd_st_execute(SV *sth, imp_sth_t *imp_sth)
         if (!create_cursor_name(sth, imp_sth))
         {
             ib_cleanup_st_execute(imp_sth);
-            return result;
+            return -2;
         }
     }
 
@@ -1132,19 +1123,20 @@ int dbd_st_execute(SV *sth, imp_sth_t *imp_sth)
     if (imp_sth->count_item)
     {
         //PerlIO_printf(PerlIO_stderr(), "calculating row count\n");
-        row_count = ib_rows(sth, &(imp_sth->stmt), imp_sth->count_item);
-        if (row_count <= -2)
+        imp_sth->nrows = ib_rows(sth, &(imp_sth->stmt), imp_sth->count_item);
+        if (imp_sth->nrows <= -2)
+        {
             ib_cleanup_st_execute(imp_sth);
-        else
-            result = row_count;
-    } else 
-        result = -1;
+        }
+    } else {
+        imp_sth->nrows = -1;
+    }
 
     DBI_TRACE_imp_xxh(imp_sth, 3, (DBIc_LOGPIO(imp_sth), "dbd_st_execute: row count: %d.\n"
                             "dbd_st_execute: count_item: %d.\n",
-                            row_count, imp_sth->count_item));
+                            imp_sth->nrows, imp_sth->count_item));
 
-    return result;
+    return imp_sth->nrows;
 }
 
 
@@ -1193,8 +1185,8 @@ AV *dbd_st_fetch(SV *sth, imp_sth_t *imp_sth)
 
         DBI_TRACE_imp_xxh(imp_sth, 3, (DBIc_LOGPIO(imp_sth), "dbd_st_fetch: fetch result: %d\n", fetch));
 
-        if (imp_sth->fetched < 0)
-            imp_sth->fetched = 0;
+        if (imp_sth->nrows < 0)
+            imp_sth->nrows = 0;
 
         if (fetch == 100)
         {
@@ -1228,7 +1220,7 @@ AV *dbd_st_fetch(SV *sth, imp_sth_t *imp_sth)
     else
     {
         /* we only fetch one row for exec procedure */
-        if (imp_sth->fetched)
+        if (imp_sth->nrows)
             return Nullav;
     }
 
@@ -1715,7 +1707,7 @@ AV *dbd_st_fetch(SV *sth, imp_sth_t *imp_sth)
 */
         }
     }
-    imp_sth->fetched += 1;
+    imp_sth->nrows += 1;
     return av;
 }
 
@@ -2917,17 +2909,7 @@ int dbd_st_blob_read(SV *sth, imp_sth_t *imp_sth, int field,
 
 int dbd_st_rows(SV* sth, imp_sth_t* imp_sth)
 {
-    /* spot common mistake of checking $h->rows just after ->execut
-        if (imp_sth->fetched < 0
-        && DBIc_WARN(imp_sth)
-        ) {
-        warn("$h->rows count is incomplete before all rows fetched.\n");
-        }
-    */
-    if (imp_sth->type == isc_info_sql_stmt_select)
-        return imp_sth->fetched;
-    else
-        return -1; /* unknown */
+    return imp_sth->nrows;
 }
 
 long ib_rows(SV *xxh, isc_stmt_handle *h_stmt, char count_type)
@@ -2938,6 +2920,10 @@ long ib_rows(SV *xxh, isc_stmt_handle *h_stmt, char count_type)
     char count_info[1], count_buffer[33];
     char *p;
     long row_count = 0;
+
+    /* Special case handling of SELECTs */
+    if (isc_info_req_select_count == count_type)
+        return 0;
 
     count_info[0] = isc_info_sql_records;
     if (isc_dsql_sql_info(status, h_stmt,
