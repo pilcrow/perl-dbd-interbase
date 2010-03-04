@@ -701,9 +701,10 @@ Supported by the driver as proposed by DBI.
 
   $rv = $sth->rows;
 
-Supported by the driver as proposed by DBI. 
-It returns the number of B<fetched> rows for select statements, otherwise
-it returns -1 (unknown number of affected rows).
+Return the number of rows affected by the last non-SELECT statement, or
+-1 if this cannot be determined.  As an extension to the DBI, this method
+also returns the number of SELECTed rows fetched so far, but this behavior
+is not portable across DBI drivers.
 
 =item B<bind_col>
 
