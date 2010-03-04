@@ -2874,6 +2874,7 @@ long ib_rowcount(SV *xxh, isc_stmt_handle *h_stmt, long *user_stmt_type)
         req_info_sz--;
 
         stmt_type = *user_stmt_type;
+        // FIXME: short-circuit the hard-coded return types (SEL, EXEC, unk.)
     }
 
     isc_dsql_sql_info(status, h_stmt, req_info_sz, req_info,
