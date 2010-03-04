@@ -253,7 +253,7 @@ struct imp_sth_st
     char            *cursor_name;
     long            type;               /* statement type */
     char            count_item;
-    int             fetched;            /* number of fetched rows */
+    int             nrows;              /* number of rows processed */
 
     char            *dateformat;
 #ifdef IB_API_V6
