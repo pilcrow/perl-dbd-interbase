@@ -5,7 +5,7 @@
 # Verify behavior of interfaces which report number of rows affected
 
 use strict;
-use Test::More tests => 66;
+use Test::More tests => 89;
 use DBI;
 use vars qw($dbh $table);
 
@@ -24,11 +24,10 @@ END {
 
 # is() with special case "zero but true" support
 sub is_maybe_zbt {
-	my ($value, $expected, $msg) = @_;
-	return is($value, $expected, $msg) unless $expected == 0;
+	my ($value, $expected) = @_;
+	return ($value == $expected) unless $expected == 0;
 
-	$msg = join(' ', $msg, '(zero but true)');
-	return ok(($value == 0 and $value), $msg);
+	return (($value == 0 and $value));
 }
 
 # == Test Initialization =========================================
@@ -77,8 +76,8 @@ for my $spec (@TEST_PROGRAM) {
 	my @bind = @{$spec->{params}} if $spec->{params};
 	my $rv = $dbh->do($spec->{sql}, undef, @bind);
 
-	is_maybe_zbt($rv, $spec->{expected}, "do($spec->{desc})");
-	is_maybe_zbt($DBI::rows, $spec->{expected}, "do($spec->{desc}) (\$DBI::rows)");
+	ok(is_maybe_zbt($rv, $spec->{expected}), "do($spec->{desc})");
+	is($DBI::rows, $spec->{expected}, "do($spec->{desc}) (\$DBI::rows)");
 }
 
 # == 2a. single execute() and rows()
@@ -88,9 +87,9 @@ for my $spec (@TEST_PROGRAM) {
 	my $sth = $dbh->prepare($spec->{sql});
 	my $rv = $sth->execute(@bind);
 
-	is_maybe_zbt($rv, $spec->{expected}, "execute($spec->{desc})");
-	is_maybe_zbt($DBI::rows, $spec->{expected}, "execute($spec->{desc}) (\$DBI::rows)");
-	is_maybe_zbt($sth->rows, $spec->{expected}, "\$sth->rows($spec->{desc})");
+	ok(is_maybe_zbt($rv, $spec->{expected}), "execute($spec->{desc})");
+	is($DBI::rows, $spec->{expected}, "execute($spec->{desc}) (\$DBI::rows)");
+	is($sth->rows, $spec->{expected}, "\$sth->rows($spec->{desc})");
 }
 
 # == 2b. repeated execute() and rows()
@@ -112,9 +111,9 @@ for my $spec (@TEST_PROGRAM) {
 		is($sth->rows, 5, "\$sth->rows(re-executed DELETE)");
 	}
 	my $rv = $sth->execute(16);
-	is_maybe_zbt($rv, "re-execute(DELETE on empty)");
-	is_maybe_zbt($DBI::rows, "re-execute(DELETE on empty) (\$DBI::rows)");
-	is_maybe_zbt($sth->rows, "\$sth->rows(re-executed DELETE on empty)");
+	ok(is_maybe_zbt($rv, 0), "re-execute(DELETE on empty) zero but true");
+	is($DBI::rows, 0, "re-execute(DELETE on empty) (\$DBI::rows) zero but true");
+	is($sth->rows, 0, "\$sth->rows(re-executed DELETE on empty) zero but true");
 }
 
 # == 3. special cases
@@ -128,9 +127,9 @@ for my $spec (@TEST_PROGRAM) {
 	}
 	my $sth = $dbh->prepare("SELECT ID, NAME FROM $table");
 	my $rv = $sth->execute;
-	zbt($rv, "execute(SELECT) -> zero but true");
-	zbt($DBI::rows, "execute(SELECT) zero but true (\$DBI::rows)");
-	zbt($sth->rows, "\$sth->rows(SELECT) zero but true");
+	ok(is_maybe_zbt($rv, 0), "execute(SELECT) -> zero but true");
+	is($DBI::rows, 0, "execute(SELECT) zero but true (\$DBI::rows)");
+	is($sth->rows, 0, "\$sth->rows(SELECT) zero but true");
 
 	my $fetched = 0;
 	while ($sth->fetch) {
