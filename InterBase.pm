@@ -134,20 +134,15 @@ package DBD::InterBase::db;
 use strict;
 use Carp;
 
-sub do 
+sub do
 {
     my($dbh, $statement, $attr, @params) = @_;
     my $rows;
-    if (@params) 
-    {
-        my $sth = $dbh->prepare($statement, $attr) or return undef;
-        $sth->execute(@params) or return undef;
-        $rows = $sth->rows;
-    } 
-    else 
-    {
-        $rows = DBD::InterBase::db::_do($dbh, $statement, $attr) or return undef;
-    }       
+
+    my $sth = $dbh->prepare($statement, $attr) or return undef;
+    $sth->execute(@params) or return undef;
+    $rows = $sth->rows;
+
     ($rows == 0) ? "0E0" : $rows;
 }
 

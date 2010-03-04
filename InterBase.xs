@@ -151,111 +151,6 @@ INCLUDE: InterBase.xsi
 MODULE = DBD::InterBase     PACKAGE = DBD::InterBase::db
 
 void
-_do(dbh, statement, attr=Nullsv)
-    SV *        dbh
-    SV *    statement
-    SV *        attr
-  PROTOTYPE: $$;$@
-  CODE:
-{
-    D_imp_dbh(dbh);
-    ISC_STATUS status[ISC_STATUS_LENGTH]; /* isc api status vector    */
-    STRLEN     slen;
-    int        retval;
-    char       *sbuf = SvPV(statement, slen);
-
-    DBI_TRACE_imp_xxh(imp_dbh, 1, (DBIc_LOGPIO(imp_dbh), "db::_do\n" "Executing : %s\n", sbuf));
-
-    /* we need an open transaction */
-    if (!imp_dbh->tr)
-    {
-        DBI_TRACE_imp_xxh(imp_dbh, 1, (DBIc_LOGPIO(imp_dbh), "starting new transaction..\n"));
-
-        if (!ib_start_transaction(dbh, imp_dbh))
-        {
-            retval = -2;
-            XST_mUNDEF(0);      /* <= -2 means error        */
-            return;
-        }
-
-        DBI_TRACE_imp_xxh(imp_dbh, 1, (DBIc_LOGPIO(imp_dbh), "new transaction started.\n"));
-    }
-
-    /* we need to count the DDL statement whether in soft / hard commit */
-#if 0
-    /* only execute_immediate statment if NOT in soft commit mode */
-    if (!(imp_dbh->soft_commit))
-    {
-        isc_dsql_execute_immediate(status, &(imp_dbh->db), &(imp_dbh->tr), 0,
-                                   sbuf, imp_dbh->sqldialect, NULL);
-
-        if (ib_error_check(dbh, status))
-            retval = -2;
-        else
-            retval = -1 ;
-    }
-    else
-#endif
-    /* count DDL statements is necessary for ib_commit_transaction to work properly */
-    {
-        isc_stmt_handle stmt = 0L;        /* temp statment handle */
-        static char     stmt_info[] = { isc_info_sql_stmt_type };
-        char            info_buffer[20];  /* statment info buffer */
-
-        retval = -2;
-
-        do
-        {
-            /* init statement handle */
-            if (isc_dsql_alloc_statement2(status, &(imp_dbh->db), &stmt))
-                break;
-
-            /* prepare statement */
-            isc_dsql_prepare(status, &(imp_dbh->tr), &stmt, 0, sbuf,
-                             imp_dbh->sqldialect, NULL);
-            if (ib_error_check(dbh, status))
-                break;
-
-            /* get statement type */
-            if (!isc_dsql_sql_info(status, &stmt, sizeof(stmt_info), stmt_info,
-                              sizeof(info_buffer), info_buffer))
-            {
-                /* need to count DDL statments */
-                short l = (short) isc_vax_integer((char *) info_buffer + 1, 2);
-                if (isc_vax_integer((char *) info_buffer + 3, l) == isc_info_sql_stmt_ddl)
-                    imp_dbh->sth_ddl++;
-            }
-            else
-                break;
-
-            /* exec the statement */
-            isc_dsql_execute(status, &(imp_dbh->tr), &stmt, imp_dbh->sqldialect, NULL);
-            if (!ib_error_check(dbh, status))
-                retval = -1;
-
-        } while (0);
-
-        /* close statement */
-        if (stmt)
-           isc_dsql_free_statement(status, &stmt, DSQL_drop);
-
-        if (retval != -2) retval = -1;
-    }
-
-    /* for AutoCommit: commit */
-    if (DBIc_has(imp_dbh, DBIcf_AutoCommit))
-    {
-        if (!ib_commit_transaction(dbh, imp_dbh))
-            retval = -2;
-    }
-
-    if (retval < -1)
-        XST_mUNDEF(0);
-    else
-        XST_mIV(0, retval); /* typically 1, rowcount or -1  */
-}
-
-void
 _ping(dbh)
     SV *    dbh
     CODE:
@@ -1420,3 +1315,4 @@ ib_plan(sth)
 }
     OUTPUT:
     RETVAL
+
