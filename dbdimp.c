@@ -743,15 +743,12 @@ void dbd_preparse(SV *sth, imp_sth_t *imp_sth, char *statement)
     DBIc_NUM_PARAMS(imp_sth) = imp_sth->in_sqlda->sqld;
 }
 
-
 int dbd_st_prepare(SV *sth, imp_sth_t *imp_sth, char *statement, SV *attribs)
 {
     D_imp_dbh_from_sth;
     ISC_STATUS  status[ISC_STATUS_LENGTH];
     int         i;
     short       dtype;
-    static char stmt_info[1];
-    char        info_buffer[20], count_item;
     XSQLVAR     *var;
 
     DBI_TRACE_imp_xxh(imp_sth, 2, (DBIc_LOGPIO(imp_sth), "Enter dbd_st_prepare\n"));
@@ -763,9 +760,6 @@ int dbd_st_prepare(SV *sth, imp_sth_t *imp_sth, char *statement, SV *attribs)
     }
 
     /* init values */
-    count_item = 0;
-
-    imp_sth->count_item  = 0;
     imp_sth->nrows       = -1;
     imp_sth->in_sqlda    = NULL;
     imp_sth->out_sqlda   = NULL;
@@ -857,67 +851,6 @@ int dbd_st_prepare(SV *sth, imp_sth_t *imp_sth, char *statement, SV *attribs)
     }
 
     DBI_TRACE_imp_xxh(imp_sth, 3, (DBIc_LOGPIO(imp_sth), "dbd_st_prepare: isc_dsql_prepare succeed..\n"));
-
-    stmt_info[0] = isc_info_sql_stmt_type;
-    isc_dsql_sql_info(status, &(imp_sth->stmt), sizeof (stmt_info), stmt_info,
-                      sizeof (info_buffer), info_buffer);
-
-    if (ib_error_check(sth, status))
-    {
-        ib_cleanup_st_prepare(imp_sth);
-        return FALSE;
-    }
-
-    {
-        short l = (short) isc_vax_integer((char *) info_buffer + 1, 2);
-        imp_sth->type = isc_vax_integer((char *) info_buffer + 3, l);
-    }
-
-    /* sanity check of statement type */
-    DBI_TRACE_imp_xxh(imp_sth, 3, (DBIc_LOGPIO(imp_sth), "dbd_st_prepare: statement type: %ld.\n", imp_sth->type));
-
-    switch (imp_sth->type)
-    {
-        /* Implemented statement types. */
-        case isc_info_sql_stmt_select:
-        case isc_info_sql_stmt_select_for_upd:
-             // See ib_rows() -- we don't actually call
-             // isc_dsql_sql_info for SELECTs
-             count_item = isc_info_req_select_count;
-             break;
-
-        case isc_info_sql_stmt_insert:
-            count_item = isc_info_req_insert_count;
-            break;
-
-        case isc_info_sql_stmt_update:
-            count_item = isc_info_req_update_count;
-            break;
-
-        case isc_info_sql_stmt_delete:
-            count_item = isc_info_req_delete_count;
-            break;
-
-        case isc_info_sql_stmt_ddl:
-        case isc_info_sql_stmt_exec_procedure:
-            /* no count_item to gather */
-            break;
-
-        /*
-         * Unimplemented statement types. Some may be implemented in the future.
-         */
-        case isc_info_sql_stmt_get_segment:
-        case isc_info_sql_stmt_put_segment:
-        case isc_info_sql_stmt_start_trans:
-        case isc_info_sql_stmt_commit:
-        case isc_info_sql_stmt_rollback:
-        default:
-            do_error(sth, 10, "Statement type is not implemented in this version of DBD::InterBase");
-            return FALSE;
-            break;
-    }
-
-    imp_sth->count_item = count_item;
 
     /* scan statement for '?', ':1' and/or ':foo' style placeholders    */
     /* realloc in_sqlda where needed */
@@ -1013,6 +946,7 @@ int dbd_st_execute(SV *sth, imp_sth_t *imp_sth)
 {
     D_imp_dbh_from_sth;
     ISC_STATUS status[ISC_STATUS_LENGTH];
+    XSQLDA *in_params = NULL;
 
     DBI_TRACE_imp_xxh(imp_sth, 2, (DBIc_LOGPIO(imp_sth), "dbd_st_execute\n"));
 
@@ -1021,60 +955,34 @@ int dbd_st_execute(SV *sth, imp_sth_t *imp_sth)
         if (!ib_start_transaction(sth, imp_dbh))
             return -2;
 
-    DBI_TRACE_imp_xxh(imp_sth, 3, (DBIc_LOGPIO(imp_sth), "dbd_st_execute: statement type: %ld.\n", imp_sth->type));
+    if (imp_sth->in_sqlda && (imp_sth->in_sqlda->sqld > 0))
+      in_params = imp_sth->in_sqlda;
+
+    DBI_TRACE_imp_xxh(imp_sth, 3, (DBIc_LOGPIO(imp_sth), "dbd_st_execute: calling isc_dsql_execute (%d params)\n", (in_params ? imp_sth->in_sqlda->sqld : 0)));
+
+    isc_dsql_execute(status, &(imp_dbh->tr), &(imp_sth->stmt),
+                     imp_dbh->sqldialect,
+                     (imp_sth->in_sqlda && (imp_sth->in_sqlda->sqld > 0))?
+                     imp_sth->in_sqlda: NULL);
+
+    if (ib_error_check(sth, status))
+    {
+      ib_cleanup_st_execute(imp_sth);
+      /* rollback any active transaction */
+      if (DBIc_has(imp_dbh, DBIcf_AutoCommit) && imp_dbh->tr)
+          ib_commit_transaction(sth, imp_dbh);
+      return -2;
+    }
+
+    DBI_TRACE_imp_xxh(imp_sth, 3, (DBIc_LOGPIO(imp_sth), "dbd_st_execute: isc_dsql_execute succeed.\n"));
+
+    imp_sth->nrows = ib_rowcount(sth, &(imp_sth->stmt), &(imp_sth->type));
+
+    DBI_TRACE_imp_xxh(imp_sth, 3, (DBIc_LOGPIO(imp_sth), "dbd_st_execute: statement type: %ld; num rows %ld.\n", imp_sth->type, imp_sth->nrows));
 
     /* we count DDL statments */
     if (imp_sth->type == isc_info_sql_stmt_ddl)
         imp_dbh->sth_ddl++;
-
-
-    /* exec procedure statement */
-    if (imp_sth->type == isc_info_sql_stmt_exec_procedure)
-    {
-        DBI_TRACE_imp_xxh(imp_sth, 3, (DBIc_LOGPIO(imp_sth), "dbd_st_execute: calling isc_dsql_execute2 (exec procedure)..\n"));
-
-        isc_dsql_execute2(status, &(imp_dbh->tr), &(imp_sth->stmt),
-                          imp_dbh->sqldialect,
-                          (imp_sth->in_sqlda && (imp_sth->in_sqlda->sqld > 0))?
-                           imp_sth->in_sqlda: NULL,
-                          (imp_sth->out_sqlda && (imp_sth->out_sqlda->sqld > 0))?
-                           imp_sth->out_sqlda: NULL);
-
-        if (ib_error_check(sth, status))
-        {
-            ib_cleanup_st_execute(imp_sth);
-            return -2;
-        }
-
-        DBI_TRACE_imp_xxh(imp_sth, 3, (DBIc_LOGPIO(imp_sth), "dbd_st_execute: isc_dsql_execute2 succeed.\n"));
-
-        imp_sth->nrows = 0; /* ??? When is it correct to return > -1 here ??? (-mjp) */
-    }
-    else /* all other types of SQL statements */
-    {
-        DBI_TRACE_imp_xxh(imp_sth, 3, (DBIc_LOGPIO(imp_sth), "dbd_st_execute: calling isc_dsql_execute..\n"));
-
-        /* check for valid in_sqlda */
-        if (!imp_sth->in_sqlda)
-            return FALSE;
-
-        isc_dsql_execute(status, &(imp_dbh->tr), &(imp_sth->stmt),
-                         imp_dbh->sqldialect,
-                         imp_sth->in_sqlda->sqld > 0 ? imp_sth->in_sqlda: NULL);
-
-        if (ib_error_check(sth, status))
-        {
-            ib_cleanup_st_execute(imp_sth);
-
-            /* rollback any active transaction */
-            if (DBIc_has(imp_dbh, DBIcf_AutoCommit) && imp_dbh->tr)
-                ib_commit_transaction(sth, imp_dbh);
-
-            return -2;
-        }
-
-        DBI_TRACE_imp_xxh(imp_sth, 3, (DBIc_LOGPIO(imp_sth), "dbd_st_execute: isc_dsql_execute succeed.\n"));
-    }
 
     /* Jika AutoCommit On, commit_transaction() (bukan retaining),
      * dan reset imp_dbh->tr == 0L
@@ -1108,7 +1016,6 @@ int dbd_st_execute(SV *sth, imp_sth_t *imp_sth)
         }
     }
 
-
     switch (imp_sth->type)
     {
         case isc_info_sql_stmt_select:
@@ -1119,22 +1026,6 @@ int dbd_st_execute(SV *sth, imp_sth_t *imp_sth)
             DBIc_ACTIVE_on(imp_sth);
             break;
     }
-
-    if (imp_sth->count_item)
-    {
-        //PerlIO_printf(PerlIO_stderr(), "calculating row count\n");
-        imp_sth->nrows = ib_rows(sth, &(imp_sth->stmt), imp_sth->count_item);
-        if (imp_sth->nrows <= -2)
-        {
-            ib_cleanup_st_execute(imp_sth);
-        }
-    } else {
-        imp_sth->nrows = -1;
-    }
-
-    DBI_TRACE_imp_xxh(imp_sth, 3, (DBIc_LOGPIO(imp_sth), "dbd_st_execute: row count: %d.\n"
-                            "dbd_st_execute: count_item: %d.\n",
-                            imp_sth->nrows, imp_sth->count_item));
 
     return imp_sth->nrows;
 }
@@ -1166,62 +1057,49 @@ AV *dbd_st_fetch(SV *sth, imp_sth_t *imp_sth)
     av = DBIS->get_fbav(imp_sth);
     svp = AvARRAY(av);
 
+    fetch = isc_dsql_fetch(status, &(imp_sth->stmt), imp_dbh->sqldialect,
+        imp_sth->out_sqlda);
+
+    if (ib_error_check(sth, status))
+      return Nullav;
+
     /*
-     * if it's an execute procedure, we've already got the
-     * output from the isc_dsql_execute2() call in dbd_st_execute().
+     * Code 100 means we've reached the end of the set
+     * of rows that the SELECT will return.
      */
-    if (imp_sth->type != isc_info_sql_stmt_exec_procedure)
+
+    DBI_TRACE_imp_xxh(imp_sth, 3, (DBIc_LOGPIO(imp_sth), "dbd_st_fetch: fetch result: %d\n", fetch));
+
+    if (imp_sth->nrows < 0)
+      imp_sth->nrows = 0;
+
+    if (fetch == 100)
     {
-        fetch = isc_dsql_fetch(status, &(imp_sth->stmt), imp_dbh->sqldialect,
-                               imp_sth->out_sqlda);
+      /* close the cursor */
+      isc_dsql_free_statement(status, &(imp_sth->stmt), DSQL_close);
 
-        if (ib_error_check(sth, status))
-            return Nullav;
+      if (ib_error_check(sth, status))
+        return Nullav;
 
-        /*
-         * Code 100 means we've reached the end of the set
-         * of rows that the SELECT will return.
-         */
+      DBI_TRACE_imp_xxh(imp_sth, 3, (DBIc_LOGPIO(imp_sth), "isc_dsql_free_statement succeed.\n"));
 
-        DBI_TRACE_imp_xxh(imp_sth, 3, (DBIc_LOGPIO(imp_sth), "dbd_st_fetch: fetch result: %d\n", fetch));
+      DBIc_ACTIVE_off(imp_sth); /* dbd_st_finish is no longer needed */
 
-        if (imp_sth->nrows < 0)
-            imp_sth->nrows = 0;
+      /* if AutoCommit on XXX. what to return if fails? */
+      if (DBIc_has(imp_dbh, DBIcf_AutoCommit))
+      {
+        if (!ib_commit_transaction(sth, imp_dbh))
+          return Nullav;
 
-        if (fetch == 100)
-        {
-            /* close the cursor */
-            isc_dsql_free_statement(status, &(imp_sth->stmt), DSQL_close);
+        DBI_TRACE_imp_xxh(imp_sth, 3, (DBIc_LOGPIO(imp_sth), "fetch ends: ib_commit_transaction succeed.\n"));
+      }
 
-            if (ib_error_check(sth, status))
-                return Nullav;
-
-            DBI_TRACE_imp_xxh(imp_sth, 3, (DBIc_LOGPIO(imp_sth), "isc_dsql_free_statement succeed.\n"));
-
-            DBIc_ACTIVE_off(imp_sth); /* dbd_st_finish is no longer needed */
-
-            /* if AutoCommit on XXX. what to return if fails? */
-            if (DBIc_has(imp_dbh, DBIcf_AutoCommit))
-            {
-                if (!ib_commit_transaction(sth, imp_dbh))
-                    return Nullav;
-
-                DBI_TRACE_imp_xxh(imp_sth, 3, (DBIc_LOGPIO(imp_sth), "fetch ends: ib_commit_transaction succeed.\n"));
-            }
-
-            return Nullav;
-        }
-        else if (fetch != 0) /* something bad */
-        {   do_error(sth, 0, "Fetch error");
-            DBIc_ACTIVE_off(imp_sth);
-            return Nullav;
-        }
-    } /* !exec_procedure */
-    else
-    {
-        /* we only fetch one row for exec procedure */
-        if (imp_sth->nrows)
-            return Nullav;
+      return Nullav;
+    }
+    else if (fetch != 0) /* something bad */
+    {   do_error(sth, 0, "Fetch error");
+      DBIc_ACTIVE_off(imp_sth);
+      return Nullav;
     }
 
     var = imp_sth->out_sqlda->sqlvar;
@@ -2912,37 +2790,88 @@ int dbd_st_rows(SV* sth, imp_sth_t* imp_sth)
     return imp_sth->nrows;
 }
 
-long ib_rows(SV *xxh, isc_stmt_handle *h_stmt, char count_type)
+long ib_rowcount(SV *xxh, isc_stmt_handle *h_stmt, long *user_stmt_type)
 {
-    ISC_STATUS status[ISC_STATUS_LENGTH];
-    short l;
-    char count_is;
-    char count_info[1], count_buffer[33];
+    ISC_STATUS  status[ISC_STATUS_LENGTH];
+    char        info[] = { isc_info_sql_stmt_type, isc_info_sql_records };
+    char res_buffer[256];
     char *p;
-    long row_count = 0;
+    short len; // length of records
+    long stmt_type;
+    char modification_type;
 
-    /* Special case handling of SELECTs */
-    if (isc_info_req_select_count == count_type)
+    isc_dsql_sql_info(status, h_stmt, sizeof(info), info,
+                      sizeof(res_buffer), res_buffer);
+
+    // res_buffer records are a record type, followed by a short len,
+    // followed by the record.  Something like:
+    //
+    //   [21][len][statement_type]        <-- isc_info_sql_stmt_type
+    //   [23][len]                        <-- isc_info_sql_records
+    //            [15][len][num_updated ]     +- isc_info_req_update_count
+    //            [16][len][num_deleted ]     +- isc_info_req_delete_count
+    //            [13][len][num_selected]     +- isc_info_req_select_count
+    //            [14][len][num_inserted]     +- isc_info_req_insert_count
+    //   [ 1]                             <-- isc_info_end
+    //
+    if (res_buffer[0] != isc_info_sql_stmt_type) {
+        if (xxh) ib_error_check(xxh, status);
+        return -1;
+    }
+
+    p = res_buffer;
+    len = (short) isc_vax_integer(++p, 2);
+    p += 2;
+    stmt_type = isc_vax_integer(p, len);
+    if (user_stmt_type) *user_stmt_type = stmt_type;
+    p += len;
+
+    switch (stmt_type) {
+      case isc_info_sql_stmt_select:
+      case isc_info_sql_stmt_select_for_upd:
+        /* A row count for SELECT isn't widely/reliably implemented, and
+         * in any case we extend the DBI to count rows fetched so far
+         * from a SELECT.  So, assume we're called right after an execute
+         * and initialize to zero rows fetched so far.
+         **/
         return 0;
+        break;
+      case isc_info_sql_stmt_insert:
+        modification_type = isc_info_req_insert_count;
+        break;
 
-    count_info[0] = isc_info_sql_records;
-    if (isc_dsql_sql_info(status, h_stmt,
-                      sizeof(count_info), count_info,
-                      sizeof(count_buffer), count_buffer))
-    {
-        if (ib_error_check(xxh, status))
-            return -2;      /* error */
+      case isc_info_sql_stmt_update:
+        modification_type = isc_info_req_update_count;
+        break;
+
+      case isc_info_sql_stmt_delete:
+        modification_type = isc_info_req_delete_count;
+        break;
+
+      case isc_info_sql_stmt_exec_procedure:
+        return 1; /* Fetch only one row from EXECUTE PROCEDURE */
+        break;    /* XXX is this correct?  -mjp */
+      default:
+        // Inapplicable or unknown statement type
+        return -1;
+        break;
     }
-    for (p = count_buffer + 3; *p != isc_info_end;) {
-        count_is = *p++;
-        l = (short) isc_vax_integer(p, 2);
+
+    p += 3;  // skip to isc_info_req_*_count records
+    while (*p != isc_info_end) {
+        char current_req;
+
+        current_req = *p++;
+        len = (short) isc_vax_integer(p, 2);
         p += 2;
-        row_count = (long) isc_vax_integer(p, l);
-        p += l;
-        if (count_is == count_type)
-            break;
+        if (current_req == modification_type) {
+            return (long) isc_vax_integer(p, len);
+        }
+        p += len;
     }
-    return row_count;
+
+    return -1; // FIXME - better error?
 }
 
 /* end */
+/* vim: set et ts=4: */

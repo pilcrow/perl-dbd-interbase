@@ -252,7 +252,6 @@ struct imp_sth_st
     XSQLDA          *in_sqlda;          /* for storing placeholder values */
     char            *cursor_name;
     long            type;               /* statement type */
-    char            count_item;
     int             nrows;              /* number of rows processed */
 
     char            *dateformat;
@@ -308,7 +307,7 @@ int ib_error_check(SV *h, ISC_STATUS *status);
 int ib_start_transaction   (SV *h, imp_dbh_t *imp_dbh);
 int ib_commit_transaction  (SV *h, imp_dbh_t *imp_dbh);
 int ib_rollback_transaction(SV *h, imp_dbh_t *imp_dbh);
-long ib_rows(SV *xxh, isc_stmt_handle *h_stmt, char count_type);
+long ib_rowcount(SV *xxh, isc_stmt_handle *h_stmt, long *stmt_type);
 void ib_cleanup_st_prepare (imp_sth_t *imp_sth);
 
 SV* dbd_db_quote(SV* dbh, SV* str, SV* type);
