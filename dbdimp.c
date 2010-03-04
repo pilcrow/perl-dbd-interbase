@@ -2790,18 +2790,69 @@ int dbd_st_rows(SV* sth, imp_sth_t* imp_sth)
     return imp_sth->nrows;
 }
 
+static long infobuf_extract_count(const char *resbuf, long stmt_type)
+{
+    char desired;
+
+    switch (stmt_type) {
+        case isc_info_sql_stmt_select:
+        case isc_info_sql_stmt_select_for_upd:
+            /* A row count for SELECT isn't widely/reliably implemented, and
+             * in any case we extend the DBI to count rows fetched so far
+             * from a SELECT.  So, assume we're called right after an execute
+             * and initialize to zero rows fetched so far.
+             **/
+            return 0;
+            break;
+        case isc_info_sql_stmt_insert:
+            desired = isc_info_req_insert_count;
+            break;
+
+        case isc_info_sql_stmt_update:
+            desired = isc_info_req_update_count;
+            break;
+
+        case isc_info_sql_stmt_delete:
+            desired = isc_info_req_delete_count;
+            break;
+
+        case isc_info_sql_stmt_exec_procedure:
+            return 1; /* Fetch only one row from EXECUTE PROCEDURE */
+            break;    /* XXX is this correct?  -mjp */
+        default:
+            // Inapplicable or unknown statement type
+            return -1;
+            break;
+    }
+
+    resbuf += 3;  // skip to isc_info_req_*_count records
+
+    while (*resbuf != isc_info_end) {
+        char cur;
+        short len;
+
+        cur = *resbuf++;
+        len = (short) isc_vax_integer(resbuf, 2);
+        resbuf += 2;
+        if (cur == desired) {
+            return (long) isc_vax_integer(resbuf, len);
+        }
+        resbuf += len;
+    }
+
+    return -1; // XXX - throw error?
+}
+
 long ib_rowcount(SV *xxh, isc_stmt_handle *h_stmt, long *user_stmt_type)
 {
     ISC_STATUS  status[ISC_STATUS_LENGTH];
-    char        info[] = { isc_info_sql_stmt_type, isc_info_sql_records };
+    char info_tags[] = { isc_info_sql_stmt_type, isc_info_sql_records };
+    char *req_info = info_tags;
+    size_t req_info_sz = 2;
     char res_buffer[256];
     char *p;
     short len; // length of records
     long stmt_type;
-    char modification_type;
-
-    isc_dsql_sql_info(status, h_stmt, sizeof(info), info,
-                      sizeof(res_buffer), res_buffer);
 
     // res_buffer records are a record type, followed by a short len,
     // followed by the record.  Something like:
@@ -2814,64 +2865,41 @@ long ib_rowcount(SV *xxh, isc_stmt_handle *h_stmt, long *user_stmt_type)
     //            [14][len][num_inserted]     +- isc_info_req_insert_count
     //   [ 1]                             <-- isc_info_end
     //
-    if (res_buffer[0] != isc_info_sql_stmt_type) {
+
+    /* If the user knows what kind of statement this is, we don't need
+     * to ask the server.
+     */
+    if (user_stmt_type && *user_stmt_type > 0) {
+        req_info++;
+        req_info_sz--;
+
+        stmt_type = *user_stmt_type;
+    }
+
+    isc_dsql_sql_info(status, h_stmt, req_info_sz, req_info,
+                      sizeof(res_buffer), res_buffer);
+
+    if (res_buffer[0] != *req_info) {
         if (xxh) ib_error_check(xxh, status);
         return -1;
     }
-
     p = res_buffer;
-    len = (short) isc_vax_integer(++p, 2);
-    p += 2;
-    stmt_type = isc_vax_integer(p, len);
-    if (user_stmt_type) *user_stmt_type = stmt_type;
-    p += len;
 
-    switch (stmt_type) {
-      case isc_info_sql_stmt_select:
-      case isc_info_sql_stmt_select_for_upd:
-        /* A row count for SELECT isn't widely/reliably implemented, and
-         * in any case we extend the DBI to count rows fetched so far
-         * from a SELECT.  So, assume we're called right after an execute
-         * and initialize to zero rows fetched so far.
-         **/
-        return 0;
-        break;
-      case isc_info_sql_stmt_insert:
-        modification_type = isc_info_req_insert_count;
-        break;
-
-      case isc_info_sql_stmt_update:
-        modification_type = isc_info_req_update_count;
-        break;
-
-      case isc_info_sql_stmt_delete:
-        modification_type = isc_info_req_delete_count;
-        break;
-
-      case isc_info_sql_stmt_exec_procedure:
-        return 1; /* Fetch only one row from EXECUTE PROCEDURE */
-        break;    /* XXX is this correct?  -mjp */
-      default:
-        // Inapplicable or unknown statement type
-        return -1;
-        break;
-    }
-
-    p += 3;  // skip to isc_info_req_*_count records
-    while (*p != isc_info_end) {
-        char current_req;
-
-        current_req = *p++;
-        len = (short) isc_vax_integer(p, 2);
+    /* Extract stmt type, if we didn't already know it, and set
+     * the result buffer to the start of the isc_info_req_* record
+     * section
+     */
+    if (req_info == info_tags) {
+        len = (short) isc_vax_integer(++p, 2);
         p += 2;
-        if (current_req == modification_type) {
-            return (long) isc_vax_integer(p, len);
-        }
+        stmt_type = isc_vax_integer(p, len);
+        if (user_stmt_type) *user_stmt_type = stmt_type;
         p += len;
     }
 
-    return -1; // FIXME - better error?
+    return infobuf_extract_count(p, stmt_type);
 }
+
 
 /* end */
 /* vim: set et ts=4: */
