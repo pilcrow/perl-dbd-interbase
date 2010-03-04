@@ -95,8 +95,8 @@ while (Testing()) {
     Test($state or $cursor->execute)
            or DbiError($dbh->err, $dbh->errstr);
 
-    Test($state or ($numrows = $cursor->rows) == 1  or  ($numrows == -1))
-    or ErrMsgF("Expected 1 rows, got %s.\n", $numrows);
+    Test($state or ($numrows = $cursor->rows) == 0)
+    or ErrMsgF("Expected 0 rows after execute, got %s.\n", $numrows);
 
     Test($state or ($numrows = TrueRows($cursor)) == 1)
     or ErrMsgF("Expected to fetch 1 rows, got %s.\n", $numrows);
@@ -117,8 +117,8 @@ while (Testing()) {
     Test($state or $cursor->execute)
        or DbiError($dbh->err, $dbh->errstr);
 
-    Test($state or ($numrows = $cursor->rows) == 2  or  ($numrows == -1))
-    or ErrMsgF("Expected 2 rows, got %s.\n", $numrows);
+    Test($state or ($numrows = $cursor->rows) == 0)
+    or ErrMsgF("Expected 0 rows after execute, got %s.\n", $numrows);
 
     Test($state or ($numrows = TrueRows($cursor)) == 2)
     or ErrMsgF("Expected to fetch 2 rows, got %s.\n", $numrows);
@@ -139,8 +139,8 @@ while (Testing()) {
     Test($state or $cursor->execute)
        or DbiError($dbh->err, $dbh->errstr);
 
-    Test($state or ($numrows = $cursor->rows) == 2  or  ($numrows == -1))
-    or ErrMsgF("Expected 2 rows, got %s.\n", $numrows);
+    Test($state or ($numrows = $cursor->rows) == 0)
+    or ErrMsgF("Expected 0 rows after execute, got %s.\n", $numrows);
 
     Test($state or ($numrows = TrueRows($cursor)) == 2)
     or ErrMsgF("Expected to fetch 2 rows, got %s.\n", $numrows);
