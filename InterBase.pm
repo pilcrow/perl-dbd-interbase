@@ -147,7 +147,7 @@ sub do
     else 
     {
         $rows = DBD::InterBase::db::_do($dbh, $statement, $attr) or return undef;
-    }       
+    }
     ($rows == 0) ? "0E0" : $rows;
 }
 
@@ -161,31 +161,10 @@ sub prepare
     $sth;
 }
 
-# from Michael Arnett <marnett@samc.com> :
-sub tables
-{
-    my $dbh = shift;
-    my @tables;
-    my @row;
-
-    my $sth = $dbh->prepare(q{
-      SELECT rdb$relation_name 
-      FROM rdb$relations 
-      WHERE (rdb$system_flag IS NULL OR rdb$system_flag = 0)
-        AND rdb$view_source IS NULL;
-    }) or return undef;
-
-    $sth->{ChopBlanks} = 1;
-    $sth->execute;
-    while (@row = $sth->fetchrow_array) {
-        push(@tables, @row);
-    }
-    return @tables;
-}
-
 sub table_info
 {
     my ($self, $cat, $schem, $name, $type, $attr) = @_;
+
     require DBD::InterBase::TableInfo;
 
     my $ti = ($self->{private_table_info}
@@ -207,7 +186,7 @@ sub table_info
         my @types = grep { length and not $seen{$_}++ }
                         map { s/'//g; s/^\s+//; s/\s+$//; uc }
                             split(',' => $type);
-        return $ti->table_info($self, $name, @types);
+        return $ti->list_tables($self, $name, @types);
     }
 }
 
