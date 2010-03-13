@@ -2,6 +2,8 @@ InterBase.h
 Changes
 lib/DBD/InterBase/GetInfo.pm
 lib/DBD/InterBase/TableInfo.pm
+lib/DBD/InterBase/TableInfo/Basic.pm
+lib/DBD/InterBase/TableInfo/Firebird21.pm
 lib/DBD/InterBase/TypeInfo.pm
 InterBase.pm
 InterBase.xs
@@ -38,11 +40,14 @@ t/80event-ithreads.t
 t/81event-fork.t
 t/90dbinfo.t
 t/91txinfo.t
+t/dbi-tables.t
+t/dbi-table_info.t
 t/InterBase.dbtest
 t/InterBase.mtest
 t/README
 t/ak-dbd.t
 t/dbdadmin.t
 t/lib.pl
+t/testlib.pl
 t/skeleton.test
 META.yml                                 Module meta-data (added by MakeMaker)
