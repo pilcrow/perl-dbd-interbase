@@ -1024,7 +1024,8 @@ int dbd_st_execute(SV *sth, imp_sth_t *imp_sth)
             DBIc_NUM_FIELDS(imp_sth) = (imp_sth->out_sqlda)?
                                         imp_sth->out_sqlda->sqld: 0;
             DBIc_ACTIVE_on(imp_sth);
-            break;
+            return -1; /* Check $sth->rows() for rows fetched so far */
+            break; /* Not reached */
     }
 
     return imp_sth->nrows;
